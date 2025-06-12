@@ -3,12 +3,16 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const passport = require("passport");
 const cookieParser = require("cookie-parser");
-const authRoutes = require("./routes/auth");
+const cors = require("cors");
 
+const authRoutes = require("./routes/auth");
+const docRoutes = require("./routes/documents");
 dotenv.config();
 require("./config/passport");
 
 const app = express();
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json());
 app.use(cookieParser());
 app.use(passport.initialize());
 
@@ -20,7 +24,7 @@ mongoose
 
 // Routes
 app.use("/auth", authRoutes);
-
+app.use("/documents", docRoutes);
 app.get("/", (req, res) => {
   res.send("Backend is running!");
 });

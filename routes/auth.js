@@ -13,14 +13,18 @@ router.get(
   passport.authenticate("google", { session: false }),
   (req, res) => {
     const token = jwt.sign(
-      { id: req.user._id, email: req.user.email },
+      {
+        id: req.user._id,
+        email: req.user.email,
+        fullName: req.user.fullName,
+        avatar: req.user.avatar,
+      },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
-    // Send token to frontend (via cookie or JSON)
     res
-      .cookie("token", token, { httpOnly: true })
+      .cookie("token", token, { httpOnly: true, secure: false }) // set secure: true in production with HTTPS
       .redirect("http://localhost:3000/dashboard");
   }
 );
