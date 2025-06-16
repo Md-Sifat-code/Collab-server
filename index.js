@@ -13,18 +13,13 @@ dotenv.config();
 require("./config/passport");
 
 const app = express();
+
+// Middleware
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(passport.initialize());
-//socket io
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: true, // your frontend origin
-    credentials: true,
-  },
-});
+
 // MongoDB
 mongoose
   .connect(process.env.MONGO_URI)
@@ -38,17 +33,65 @@ app.get("/", (req, res) => {
   res.send("Backend is running!");
 });
 
-// Real-time socket logic
-const documentContents = {}; // Temporary in-memory store
+// Create server and Socket.IO instance
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: true,
+    credentials: true,
+  },
+});
 
+// In-memory document content and user tracking
+const documentContents = {};
+const userSockets = new Map(); // socket.id => user
+
+// Helper: Get all users in a room
+function getUsersInRoom(docId) {
+  const room = io.sockets.adapter.rooms.get(docId);
+  const userList = [];
+  if (room) {
+    for (const socketId of room) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket?.user) {
+        userList.push(socket.user);
+      }
+    }
+  }
+  return userList;
+}
+
+// Socket.IO connection logic
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
-  socket.on("join", (docId) => {
-    socket.join(docId);
-    console.log(`User joined doc: ${docId}`);
+  socket.on("join", (payload) => {
+    let docId, user;
+    if (typeof payload === "string") {
+      // Defensive fallback if payload is string (old usage)
+      docId = payload;
+      user = null;
+    } else if (payload && typeof payload === "object") {
+      docId = payload.docId;
+      user = payload.user;
+    } else {
+      console.log("Invalid join payload", payload);
+      return;
+    }
 
-    // Optional: send current content to newly joined user
+    socket.join(docId);
+    socket.user = user;
+    userSockets.set(socket.id, user);
+
+    if (user && user.fullName) {
+      console.log(`User ${user.fullName} joined doc ${docId}`);
+      socket.to(docId).emit("user-joined", user);
+    } else {
+      console.log(`An unidentified user joined doc ${docId}`);
+    }
+
+    io.to(docId).emit("users-in-room", getUsersInRoom(docId));
+
     if (documentContents[docId]) {
       socket.emit("load-document", documentContents[docId]);
     }
@@ -59,11 +102,19 @@ io.on("connection", (socket) => {
     socket.to(docId).emit("receive-changes", content);
   });
 
+  socket.on("disconnecting", () => {
+    const rooms = [...socket.rooms].filter((r) => r !== socket.id);
+    for (const docId of rooms) {
+      socket.to(docId).emit("user-left", socket.user);
+    }
+  });
+
   socket.on("disconnect", () => {
-    console.log("User disconnected");
+    console.log("User disconnected:", socket.id);
+    userSockets.delete(socket.id);
   });
 });
 
+// Start server
 const PORT = process.env.PORT || 5000;
-
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
